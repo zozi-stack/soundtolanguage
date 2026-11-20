@@ -314,7 +314,7 @@ function setMode(m,msg,warn){
   mode=m;
   micBtn.setAttribute('aria-pressed',m==='mic'); demoBtn.setAttribute('aria-pressed',m==='demo');
   statusEl.textContent=msg; statusEl.classList.toggle('warn',!!warn); wake();
-  avg.fill(0);
+  avg.fill(0); floor.fill(0); calibUntil=performance.now()+800; deafUntil=0;
 }
 function useMic(auto){
   if(mode==='mic'){ stopInputs(); setMode('idle','Microphone off.'); return; }
@@ -404,11 +404,21 @@ sndBtn.addEventListener('click',function(){ soundOn=!soundOn; sndBtn.setAttribut
 
 /* ---------- frequency -> letter ---------- */
 var avg=new Float32Array(N), show=new Float32Array(N);
+var floor=new Float32Array(N), calibUntil=0, deafUntil=0;   /* room-noise level per band; settle time; time the mic ignores our own key click */
 var GATE=0.15, nextAt=0, lastSound=0, lastIdx=-1, lastE=0, lastStamp=0, pendingSpace=false, pendingBreak=false, prev=0;
 function frame(now){
   var dt=Math.min(100,now-prev||16); prev=now;
   var e=mode==='demo'?demoBands(now):(mode==='idle'||!analyser)?silence():analyserBands();
   var peak=0, sum=0, wsum=0, i;
+  var live=mode==='mic', calibrating=live&&now<calibUntil, deaf=live&&now<deafUntil;
+  if(live){
+    /* Steady room noise (fans, hum, hiss) is learned as a floor and subtracted, so only sound that rises above the room types.
+       The floor follows quiet quickly and loudness slowly; it is not updated while our own click is in the air. */
+    for(i=0;i<N;i++){
+      if(!deaf) floor[i]+=(e[i]-floor[i])*Math.min(1,dt/(calibrating?120:(e[i]>floor[i]?6000:300)));
+      e[i]=Math.max(0,e[i]-floor[i]*1.25-0.03);
+    }
+  }
   for(i=0;i<N;i++){
     if(e[i]>peak) peak=e[i];
     sum+=e[i]; wsum+=e[i]*i;
@@ -416,7 +426,8 @@ function frame(now){
     spans[i].style.opacity=(0.18+0.82*show[i]).toFixed(2);
   }
   var centroid=sum>0?wsum/sum/(N-1):0.4;
-  if(peak<GATE){
+  if(calibrating||deaf){ /* listen, type nothing */ }
+  else if(peak<GATE){
     var quiet=now-lastSound;
     if(quiet>320) pendingSpace=true;
     if(quiet>1400) pendingBreak=true;
@@ -435,11 +446,12 @@ function frame(now){
       if(best>=0){
         stamp(best,e[best],centroid,now);
         lastIdx=best; lastE=e[best]; lastStamp=now;
+        if(live&&soundOn&&audio&&audio.state==='running') deafUntil=now+outLatency()+110;   /* do not let the mic type from the click it just made */
         nextAt=now+200-115*Math.min(1,peak);   /* never faster than a typist: each strike stays a separate sound */
       }
     }
   }
-  var k=dt/1100; for(i=0;i<N;i++) avg[i]+=(e[i]-avg[i])*k;
+  var k=deaf?0:dt/1100; for(i=0;i<N;i++) avg[i]+=(e[i]-avg[i])*k;
   if(lastIdx>=0) lastE*=0.985;
   render(now);
   requestAnimationFrame(frame);
