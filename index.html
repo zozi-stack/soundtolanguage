@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090b12">
+    <title>Sound to Language — Music Visualizer</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="visualizer.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <a class="wordmark" href="#" aria-label="Sound to Language home">
+          <span class="wordmark-icon" aria-hidden="true">≈</span>
+          <span>sound<span class="wordmark-light">to</span>language</span>
+        </a>
+        <span class="live-indicator"><span></span> LIVE AUDIO VISUALIZER</span>
+      </header>
+
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">SEE WHAT YOU HEAR</p>
+        <h1 id="page-title">Music, in motion.</h1>
+        <p class="intro">Drop into the sound. Choose a track and watch it come alive.</p>
+
+        <section class="visualizer-card" aria-label="Music visualizer">
+          <div class="visualizer-heading">
+            <div class="track-info" aria-live="polite">
+              <span class="track-mark" aria-hidden="true">♫</span>
+              <div>
+                <p class="track-title" id="track-title">Nothing playing yet</p>
+                <p class="track-subtitle" id="track-subtitle">Your next favorite view starts with a song</p>
+              </div>
+            </div>
+            <span class="visualizer-mode"><span class="mode-dot"></span> SPECTRUM</span>
+          </div>
+          <canvas id="visualizer" aria-label="Live audio frequency and waveform visualization" role="img"></canvas>
+          <div class="visualizer-scale" aria-hidden="true">
+            <span>LOW</span><span>MID</span><span>HIGH</span>
+          </div>
+          <audio id="audio" controls preload="metadata" aria-label="Audio playback controls"></audio>
+          <div class="visualizer-footer">
+            <span id="status" role="status">Ready when you are</span>
+            <span>YOUR AUDIO STAYS ON YOUR DEVICE</span>
+          </div>
+        </section>
+
+        <div class="upload-area">
+          <input id="audio-file" type="file" accept="audio/*">
+          <label class="upload-button" for="audio-file">
+            <span aria-hidden="true">＋</span> Choose a track
+          </label>
+          <p>MP3, WAV, M4A, OGG and more</p>
+        </div>
+      </section>
+
+      <footer>Made for listening a little closer.</footer>
+    </main>
+  </body>
+</html>
