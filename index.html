@@ -35,7 +35,7 @@ header,.bar{position:fixed;left:0;right:0;z-index:2;background:rgba(241,239,236,
 header{top:0;padding:12px 150px 12px 20px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 24px}
 .bar{bottom:0;padding:12px 20px 14px;display:flex;flex-direction:column;gap:12px}
 body.bare header,body.bare .bar{opacity:0;pointer-events:none;visibility:hidden}
-#uiBtn{position:fixed;top:9px;right:14px;z-index:3;background:rgba(241,239,236,.92)}
+#uiBtn{position:fixed;top:9px;right:14px;z-index:3;background:rgba(241,239,236,.92);color:var(--ink)}
 body.bare #uiBtn{opacity:.4}
 body.bare #uiBtn:hover,body.bare #uiBtn:focus-visible{opacity:1}
 @media (prefers-reduced-motion: reduce){header,.bar{transition:none}}
@@ -64,6 +64,8 @@ button:hover,.file:hover{background:rgba(28,25,22,.07)}
 button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
 button.quiet{border-color:var(--rule);color:var(--ink-soft)}
 button:focus-visible,.file:focus-within,input:focus-visible{outline:2px solid var(--proof);outline-offset:2px}
+.views{display:flex}
+.views button+button{margin-left:-1px}
 .file input{position:absolute;width:1px;height:1px;opacity:0}
 .sens{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink-soft)}
 input[type=range]{width:110px;accent-color:var(--ink)}
@@ -89,6 +91,10 @@ input[type=range]{width:110px;accent-color:var(--ink)}
 </div>
 
 <div class="controls">
+  <span class="views" role="group" aria-label="Visualizer">
+    <button id="viewPress" type="button" aria-pressed="true" title="Key: 1">Letterpress</button>
+    <button id="viewCols" type="button" aria-pressed="false" title="Key: 2">Columns</button>
+  </span>
   <button id="micBtn" type="button" aria-pressed="false" title="Key: M">Use microphone</button>
   <label class="file" id="fileLabel" title="Key: F">Play an audio file<input id="fileIn" type="file" accept="audio/*"></label>
   <button id="demoBtn" type="button" aria-pressed="false" title="Key: D">Demo signal</button>
@@ -125,7 +131,7 @@ function layout(aspect){
   MAXLINES=Math.max(1,Math.floor(BH/LH));
 }
 layout(1.5);
-function resetSheet(){ glyphs=[]; ghost=[]; line=0; cx=LEFT; capNext=true; track=FS*0.12; }
+function resetSheet(){ glyphs=[]; ghost=[]; line=0; cx=LEFT; capNext=true; track=FS*0.12; colReset(); }
 var glyphs=[], ghost=[], line=0, cx=0, track=0, capNext=true;
 var widths={}, mcan=document.createElement('canvas').getContext('2d');
 function measure(){
@@ -139,6 +145,7 @@ function newLine(centroid){
   if(line>=MAXLINES){ ghost=glyphs; glyphs=[]; line=0; rebuild(); }
 }
 function stamp(idx,strength,centroid,now){
+  if(view==='cols'){ colStamp(idx,strength,centroid,now); return; }
   var ch=LETTERS[idx];
   if(pendingBreak&&cx>LEFT){ newLine(centroid); capNext=true; }
   else if(pendingSpace&&cx>LEFT){ cx+=FS*0.3+track*0.6; }
@@ -232,6 +239,7 @@ function rebuild(){
   gctx.save(); gctx.translate(ghostLayer.width,0); gctx.scale(-1,1);
   for(var j=0;j<ghost.length;j++) drawGlyph(gctx,ghost[j],0.075,1,0);
   gctx.restore();
+  colRebuild();
 }
 function resize(){
   var r=stage.getBoundingClientRect();
@@ -239,11 +247,12 @@ function resize(){
   paper.style.width=w+'px'; paper.style.height=h+'px';
   dpr=Math.min(window.devicePixelRatio||1,2);
   P=Math.round(w*dpr);
-  [canvas,inkLayer,ghostLayer,scratch].forEach(function(c){c.width=P;c.height=Math.round(P*aspect);});
-  if(Math.abs(aspect-ASPECT)>0.015||!cx){ layout(aspect); measure(); resetSheet(); }   /* a new shape is a new sheet */
+  [canvas,inkLayer,ghostLayer,scratch,colLayer].forEach(function(c){c.width=P;c.height=Math.round(P*aspect);});
+  if(Math.abs(aspect-ASPECT)>0.015||!cx){ layout(aspect); measure(); colLayout(); resetSheet(); }   /* a new shape is a new sheet */
   rebuild();
 }
 function render(now){
+  if(view==='cols'){ colRender(now); return; }
   sctx.globalCompositeOperation='source-over';
   sctx.clearRect(0,0,scratch.width,scratch.height);
   sctx.drawImage(inkLayer,0,0);
@@ -261,6 +270,91 @@ function render(now){
   ctx.save(); ctx.translate(mx,my); ctx.rotate(-TILT); ctx.translate(-mx,-my); ctx.drawImage(ghostLayer,0,0); ctx.restore();   /* reverse side leans the other way */
   ctx.save(); ctx.translate(mx,my); ctx.rotate(TILT); ctx.translate(-mx,-my); ctx.drawImage(scratch,0,0); ctx.restore();
 }
+
+/* ---------- second view, "Columns": small sans paragraphs, each line under a gradient bar that dissolves into dots ---------- */
+var SANS='"Helvetica Neue",Helvetica,Arial,sans-serif';
+var view='press';
+var HUES=['43,139,217','92,52,22','239,138,44','226,58,30'];   /* low sounds blue, then brown, orange, red for the brightest */
+var C={lines:[],line:null,col:0,row:0,n:0,max:4,started:false,cap:true,color:HUES[0]};
+var colLayer=document.createElement('canvas'), lctx=colLayer.getContext('2d');
+function colLayout(){
+  var m=Math.min(1,ASPECT);
+  C.fs=Math.max(11*dpr/P,0.0165*m); C.lh=C.fs*1.2;
+  C.mx=Math.max(0.035,C.fs*2.5); C.my=C.mx*1.7+C.fs;
+  C.cw=C.fs*13.5;
+  C.cols=Math.max(1,Math.min(6,Math.floor((1-2*C.mx+C.fs*5)/(C.cw+C.fs*5))));
+  C.pitch=C.cols>1?(1-2*C.mx-C.cw-C.fs*4)/(C.cols-1):0;   /* columns spread across the sheet, room left for the dot tails */
+  C.paraH=C.lh*8.5;
+  C.rows=Math.max(1,Math.floor((ASPECT-2*C.my+C.lh*2)/C.paraH));
+}
+function colReset(){ C.lines=[]; C.line=null; C.col=0; C.row=0; C.n=0; C.started=false; C.cap=true; }
+function colMeasure(str){ mcan.font='400 100px '+SANS; return mcan.measureText(str).width/100*C.fs; }
+function drawColLine(c,L){
+  var fs=C.fs*P, lh=C.lh*P, x=L.x*P, y=L.y*P;
+  var x0=x-fs*0.35, top=Math.round(y-lh*0.76), h=Math.ceil(lh), solid=L.w*P+fs*0.7, tail=L.tail*fs;
+  var gr=c.createLinearGradient(x0,0,x0+solid,0);
+  gr.addColorStop(0,'rgba('+L.color+','+L.a+')'); gr.addColorStop(1,'rgba('+L.color+','+(L.a*0.5)+')');
+  c.fillStyle=gr; c.fillRect(x0,top,solid,h);
+  /* halftone tail: three rows of dots that shrink as the bar runs out */
+  var d=h/3, n=Math.max(1,Math.floor(tail/d));
+  c.fillStyle='rgba('+L.color+','+(L.a*0.5)+')';
+  for(var k=0;k<n;k++){
+    var r=d*0.5*(1-k/n)*0.95; if(r<0.3) break;
+    for(var j=0;j<3;j++){ c.beginPath(); c.arc(x0+solid+d*(k+0.5),top+d*(j+0.5),r,0,6.2832); c.fill(); }
+  }
+  c.font='400 '+fs+'px '+SANS; c.textAlign='left'; c.textBaseline='alphabetic'; c.fillStyle='#1c1916';
+  c.fillText(L.text,x,y);
+}
+function colEndLine(){ if(C.line){ drawColLine(lctx,C.line); C.line=null; } }
+function colNewLine(strength,centroid){
+  if(!C.started||C.n>=C.max){                        /* next paragraph: next column, then next row, then a fresh sheet */
+    if(C.started){
+      C.col++; if(C.col>=C.cols){ C.col=0; C.row++; }
+      if(C.row>=C.rows){ C.row=0; C.lines=[]; lctx.clearRect(0,0,colLayer.width,colLayer.height); }
+      returnSound();
+    }
+    C.started=true; C.n=0; C.max=2+Math.floor(Math.random()*5); C.cap=true;
+    C.color=HUES[Math.max(0,Math.min(3,Math.floor(centroid*4)))];
+  }
+  C.line={x:C.mx+C.col*C.pitch,y:C.my+C.row*C.paraH+C.n*C.lh,text:'',w:0,color:C.color,
+          a:Math.max(0.16,(0.4+0.55*Math.min(1,strength))*(1-0.13*C.n)),tail:1.5+Math.min(1,strength)*7};
+  C.n++; C.lines.push(C.line);
+}
+function colStamp(idx,strength,centroid,now){
+  var space=pendingSpace;
+  if(pendingBreak&&C.started){ colEndLine(); C.n=C.max; }
+  pendingBreak=pendingSpace=false;
+  if(!C.line) colNewLine(strength,centroid);
+  var ch=LETTERS[idx], t=C.line.text+(space&&C.line.text?' ':'')+ch;
+  if(colMeasure(t)>C.cw){ colEndLine(); colNewLine(strength,centroid); t=ch; }
+  var upper=C.cap; if(upper){ t=t.slice(0,-1)+ch.toUpperCase(); C.cap=false; }
+  C.line.text=t; C.line.w=colMeasure(t);
+  spans[idx].classList.add('hit'); setTimeout(function(){spans[idx].classList.remove('hit')},160);
+  keySound(Math.min(1,strength),idx,(C.line.x+C.line.w)*2-1,upper);
+}
+function colRebuild(){
+  lctx.clearRect(0,0,colLayer.width,colLayer.height);
+  for(var i=0;i<C.lines.length;i++){ if(C.lines[i]!==C.line) drawColLine(lctx,C.lines[i]); }
+}
+function colRender(){
+  sctx.globalCompositeOperation='source-over'; sctx.globalAlpha=1;
+  sctx.clearRect(0,0,scratch.width,scratch.height);
+  sctx.drawImage(colLayer,0,0);
+  if(C.line) drawColLine(sctx,C.line);
+  sctx.globalCompositeOperation='source-atop'; sctx.globalAlpha=0.55; sctx.fillStyle=speckle; sctx.fillRect(0,0,scratch.width,scratch.height);
+  sctx.globalAlpha=1;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(scratch,0,0);
+}
+function setView(v){
+  view=v;
+  $('viewPress').setAttribute('aria-pressed',v==='press'); $('viewCols').setAttribute('aria-pressed',v==='cols');
+  pendingSpace=pendingBreak=false;
+  try{ localStorage.setItem('letterpress-view',v); }catch(e){}
+}
+$('viewPress').addEventListener('click',function(){ setView('press'); });
+$('viewCols').addEventListener('click',function(){ setView('cols'); });
+try{ if(localStorage.getItem('letterpress-view')==='cols') setView('cols'); }catch(e){}
 
 /* ---------- sound sources: each returns 26 band energies, 0..1 ---------- */
 var out=new Float32Array(N), audio=null, analyser=null, bytes=null, binLo=[], binHi=[];
@@ -468,7 +562,7 @@ uiBtn.addEventListener('click',function(){ setUI(document.body.classList.contain
 document.addEventListener('keydown',function(e){
   if(e.metaKey||e.ctrlKey||e.altKey||e.target===sens) return;
   var k=(e.key||'').toLowerCase();
-  if(k==='h') uiBtn.click(); else if(k==='s') sndBtn.click(); else if(k==='m') micBtn.click(); else if(k==='d') demoBtn.click();
+  if(k==='1') setView('press'); else if(k==='2') setView('cols'); else if(k==='h') uiBtn.click(); else if(k==='s') sndBtn.click(); else if(k==='m') micBtn.click(); else if(k==='d') demoBtn.click();
   else if(k==='c') $('clearBtn').click(); else if(k==='f') fileIn.click();
 });
 
