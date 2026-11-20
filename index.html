@@ -69,13 +69,13 @@ button:focus-visible,.file:focus-within,input:focus-visible{outline:2px solid va
 input[type=range]{width:110px;accent-color:var(--ink)}
 </style>
 </head>
-<body>
+<body class="bare">
 <header>
   <h1>Sound Letterpress</h1>
   <p id="status" role="status" aria-live="polite">Demo signal, no sound. Pick an input below.</p>
 </header>
 
-<button id="uiBtn" type="button" aria-pressed="true" title="Key: H">Hide controls</button>
+<button id="uiBtn" type="button" aria-pressed="false" title="Key: H">Show controls</button>
 
 <div class="stage" id="stage">
   <div class="paper" id="paper"><canvas id="sheet" aria-label="Sheet of paper with letters stamped by sound"></canvas></div>
@@ -140,10 +140,11 @@ function stamp(idx,strength,centroid,now){
   else if(pendingSpace&&cx>LEFT){ cx+=FS*0.3+track*0.6; }
   pendingBreak=pendingSpace=false;
   if(capNext){ ch=ch.toUpperCase(); capNext=false; }
-  var w=widths[ch]||FS*0.5;
+  var w=widths[ch]||FS*0.5, gs;
   if(cx+w>RIGHT) newLine(centroid);
   glyphs.push({ch:ch,x:cx,w:w,y:TOP+(line+1)*LH+(Math.random()-.5)*FS*0.035,
-    a:0.74+0.26*Math.min(1,strength),r:(Math.random()-.5)*0.04,t:now,done:false});
+    a:0.74+0.26*Math.min(1,strength),r:(Math.random()-.5)*0.04,t:now,done:false,
+    gs:(gs=380+Math.random()*180),gx:Math.random()*(640-gs),gy:Math.random()*(960-gs)});
   cx+=w+track;
   spans[idx].classList.add('hit');
   setTimeout(function(){spans[idx].classList.remove('hit')},160);
@@ -154,7 +155,8 @@ var P=0, dpr=1, inkLayer=document.createElement('canvas'), ghostLayer=document.c
 var ictx=inkLayer.getContext('2d'), gctx=ghostLayer.getContext('2d');
 var scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
 /* grainy black / red / orange field the letters are cut from; built once, small, so the grain stays coarse */
-var gradLayer=document.createElement('canvas'), GROW=1.35;
+var gradLayer=document.createElement('canvas');
+var cell=document.createElement('canvas'), cctx=cell.getContext('2d');
 (function(){
   var w=640, h=960; gradLayer.width=w; gradLayer.height=h;
   var g=gradLayer.getContext('2d'), img=g.createImageData(w,h), d=img.data;
@@ -200,11 +202,27 @@ function drawGlyph(c,g,alphaMul,scale,blur){
   c.fillText(g.ch,0,0);
   c.restore();
 }
+/* one letter, cut from its own random patch of the field, so a full sweep of colour sits inside each glyph */
+function inkGlyph(c,g,alphaMul,scale,blur){
+  var n=cell.width, bx=n/2, by=n*0.62;
+  cctx.globalCompositeOperation='source-over';
+  cctx.clearRect(0,0,n,n);
+  cctx.save(); setFont(cctx);
+  cctx.translate(bx,by); cctx.rotate(g.r); cctx.scale(scale,scale);
+  cctx.globalAlpha=g.a*alphaMul;
+  if(blur>0){ cctx.shadowColor='rgba(28,25,22,.9)'; cctx.shadowBlur=blur; }
+  cctx.fillText(g.ch,0,0);
+  cctx.restore();
+  cctx.globalCompositeOperation='source-in';
+  cctx.drawImage(gradLayer,g.gx,g.gy,g.gs,g.gs,0,0,n,n);
+  c.drawImage(cell,Math.round((g.x+g.w/2)*P-bx),Math.round(g.y*P-by));
+}
 function rebuild(){
+  cell.width=cell.height=Math.max(8,Math.ceil(FS*P*2.4));
   ictx.clearRect(0,0,inkLayer.width,inkLayer.height);
   gctx.clearRect(0,0,ghostLayer.width,ghostLayer.height);
-  setFont(ictx); setFont(gctx);
-  for(var i=0;i<glyphs.length;i++){ if(glyphs[i].done) drawGlyph(ictx,glyphs[i],1,1,0); }
+  setFont(gctx);
+  for(var i=0;i<glyphs.length;i++){ if(glyphs[i].done) inkGlyph(ictx,glyphs[i],1,1,0); }
   /* previous sheet shows through, mirrored, like print on the reverse */
   gctx.save(); gctx.translate(ghostLayer.width,0); gctx.scale(-1,1);
   for(var j=0;j<ghost.length;j++) drawGlyph(gctx,ghost[j],0.075,1,0);
@@ -221,22 +239,16 @@ function resize(){
   rebuild();
 }
 function render(now){
-  /* letters become a mask on the scratch layer, then the gradient is poured into them */
   sctx.globalCompositeOperation='source-over';
   sctx.clearRect(0,0,scratch.width,scratch.height);
   sctx.drawImage(inkLayer,0,0);
-  setFont(sctx);
   for(var i=glyphs.length-1;i>=0;i--){
     var g=glyphs[i]; if(g.done) break;
     var age=(now-g.t)/320;
-    if(reduced||age>=1){ g.done=true; setFont(ictx); drawGlyph(ictx,g,1,1,0); drawGlyph(sctx,g,1,1,0); continue; }
+    if(reduced||age>=1){ g.done=true; inkGlyph(ictx,g,1,1,0); inkGlyph(sctx,g,1,1,0); continue; }
     var k=1-Math.pow(1-age,3);               /* press in, wet ink settles */
-    drawGlyph(sctx,g,Math.min(1,age*3),1.22-0.22*k,(1-k)*5*dpr);
+    inkGlyph(sctx,g,Math.min(1,age*3),1.22-0.22*k,(1-k)*5*dpr);
   }
-  var H=P*ASPECT, spare=GROW-1;
-  var ox=reduced?0:(0.5+0.5*Math.sin(now/9000))*spare*P, oy=reduced?0:(0.5+0.5*Math.cos(now/13000))*spare*H;
-  sctx.globalCompositeOperation='source-in';
-  sctx.drawImage(gradLayer,-ox,-oy,P*GROW,H*GROW);
   sctx.globalCompositeOperation='source-atop'; sctx.fillStyle=speckle; sctx.fillRect(0,0,scratch.width,scratch.height);
   sctx.globalCompositeOperation='destination-out'; sctx.fillStyle=pinhole; sctx.fillRect(0,0,scratch.width,scratch.height);
   ctx.clearRect(0,0,canvas.width,canvas.height);
