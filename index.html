@@ -52,6 +52,7 @@ h1{margin:0;font-size:1.15rem;font-weight:500;letter-spacing:.02em}
 canvas{display:block;width:100%;height:100%}
 .spectrum{display:flex;align-items:baseline;gap:10px;justify-content:center;font-size:.8rem;color:var(--ink-soft)}
 .spectrum .hz{white-space:nowrap;font-variant-numeric:tabular-nums}
+#note{min-width:2.2em;color:var(--ink)}
 #alphabet{display:flex;gap:clamp(1px,1.1vw,9px);font-size:clamp(.85rem,2.6vw,1.15rem);color:var(--ink)}
 #alphabet span{opacity:.18;width:.72em;text-align:center}
 #alphabet span.hit{color:var(--proof)}
@@ -88,6 +89,7 @@ input[type=range]{width:110px;accent-color:var(--ink)}
   <span class="hz">80 Hz</span>
   <div id="alphabet"></div>
   <span class="hz">8 kHz</span>
+  <span class="hz" id="note" title="Note heard">&nbsp;</span>
 </div>
 
 <div class="controls">
@@ -139,6 +141,9 @@ function measure(){
   var all=LETTERS+LETTERS.toUpperCase();
   for(var i=0;i<all.length;i++) widths[all[i]]=mcan.measureText(all[i]).width/100*FS;
 }
+function volAlpha(v){                      /* barely-heard sound prints faint, loud sound prints solid */
+  v=Math.max(0,Math.min(1,(v-0.15)/0.85)); return 0.14+0.86*Math.pow(v,0.8);
+}
 function newLine(centroid){
   line++; cx=LEFT; returnSound();
   track=FS*(0.02+0.6*Math.pow(centroid,1.3));
@@ -154,8 +159,8 @@ function stamp(idx,strength,centroid,now){
   var w=widths[ch]||FS*0.5, gs;
   if(cx+w>RIGHT) newLine(centroid);
   glyphs.push({ch:ch,x:cx,w:w,y:TOP+(line+1)*LH+(Math.random()-.5)*FS*0.035,
-    a:0.74+0.26*Math.min(1,strength),r:(Math.random()-.5)*0.04,t:now+outLatency(),done:false,
-    gs:(gs=380+Math.random()*180),gx:Math.random()*(640-gs),gy:Math.random()*(960-gs)});
+    a:volAlpha(strength),r:(Math.random()-.5)*0.04,t:now+outLatency(),done:false,
+    gs:(gs=285+Math.random()*135),gx:Math.random()*(FW-gs),gy:Math.random()*(FH-gs),pc:notePc});
   keySound(Math.min(1,strength),idx,(cx-LEFT)/(RIGHT-LEFT)*2-1,ch!==LETTERS[idx]);
   cx+=w+track;
   spans[idx].classList.add('hit');
@@ -169,32 +174,48 @@ var scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
 /* grainy black / red / orange field the letters are cut from; built once, small, so the grain stays coarse */
 var gradLayer=document.createElement('canvas');
 var cell=document.createElement('canvas'), cctx=cell.getContext('2d');
+var FW=480, FH=720, FIELDS=[], NOTE_RGB=[], NOTE_NAMES=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+function hsl(h,sat,l){                     /* -> [r,g,b] 0..255 */
+  h=((h%360)+360)%360/360; var q=l<.5?l*(1+sat):l+sat-l*sat, p2=2*l-q;
+  function f(t){ t=(t+1)%1; return t<1/6?p2+(q-p2)*6*t:t<.5?q:t<2/3?p2+(q-p2)*(2/3-t)*6:p2; }
+  return [f(h+1/3)*255,f(h)*255,f(h-1/3)*255];
+}
 (function(){
-  var w=640, h=960; gradLayer.width=w; gradLayer.height=h;
-  var g=gradLayer.getContext('2d'), img=g.createImageData(w,h), d=img.data;
-  /* colour ramp: black, ember, red, orange, a thin pale flare, back down to black */
-  var stops=[[0,16,13,12],[.26,24,14,11],[.38,120,22,10],[.48,226,44,14],[.60,240,118,24],[.70,247,176,104],
-             [.755,244,228,212],[.80,243,150,60],[.88,196,40,14],[.95,70,18,10],[1,16,13,12]];
-  var ramp=new Uint8Array(256*3);
-  for(var k=0;k<256;k++){
-    var t=k/255, a=0; while(a<stops.length-2&&t>stops[a+1][0]) a++;
-    var A=stops[a], B=stops[a+1], f=(t-A[0])/(B[0]-A[0]); f=f*f*(3-2*f);
-    for(var c=0;c<3;c++) ramp[k*3+c]=A[c+1]+(B[c+1]-A[c+1])*f;
-  }
+  var w=FW, h=FH, shape=new Uint8Array(w*h), grain=new Int8Array(w*h), x, y;
   /* warped sine field: long liquid bands with finer ripples riding on them */
-  for(var y=0;y<h;y++){
-    for(var x=0;x<w;x++){
+  for(y=0;y<h;y++){
+    for(x=0;x<w;x++){
       var u=x/w*7, v=y/w*7;
       var wx=u+0.95*Math.sin(v*1.25+1.7)+0.38*Math.sin(v*2.9+u*1.1)+0.12*Math.sin(v*7.3-u*4.1);
       var wy=v+0.85*Math.sin(u*1.05+0.4)+0.33*Math.sin(u*3.1-v*0.7+2)+0.10*Math.sin(u*6.7+v*5.3);
       var tt=0.5+0.5*Math.sin(wx*1.55+wy*1.05+0.7*Math.sin(wx*0.7-wy*1.9)+0.25*Math.sin(wx*4.3+wy*3.7));
-      var shade=0.5+0.5*Math.sin(wx*0.45-wy*0.6+1.1);            /* slow drift between darker and hotter regions */
-      tt=Math.max(0,Math.min(1,tt*(0.72+0.28*shade)));
-      var q=(tt*255|0)*3, o=(y*w+x)*4, n=(Math.random()-.5)*95;  /* coarse grain baked into the field */
-      d[o]=ramp[q]+n; d[o+1]=ramp[q+1]+n*0.9; d[o+2]=ramp[q+2]+n*0.8; d[o+3]=255;
+      var shade=0.5+0.5*Math.sin(wx*0.45-wy*0.6+1.1);
+      shape[y*w+x]=Math.max(0,Math.min(1,tt*(0.72+0.28*shade)))*255;
+      grain[y*w+x]=(Math.random()-.5)*95;                       /* coarse grain baked into every field */
     }
   }
-  g.putImageData(img,0,0);
+  function build(stops){
+    var ramp=new Uint8Array(256*3), k, c;
+    for(k=0;k<256;k++){
+      var t=k/255, a=0; while(a<stops.length-2&&t>stops[a+1][0]) a++;
+      var A=stops[a], B=stops[a+1], f=(t-A[0])/(B[0]-A[0]); f=f*f*(3-2*f);
+      for(c=0;c<3;c++) ramp[k*3+c]=A[c+1]+(B[c+1]-A[c+1])*f;
+    }
+    var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    var g=cv.getContext('2d'), img=g.createImageData(w,h), d=img.data;
+    for(var i=0;i<w*h;i++){ var q=shape[i]*3, o=i*4, n=grain[i]; d[o]=ramp[q]+n; d[o+1]=ramp[q+1]+n*0.9; d[o+2]=ramp[q+2]+n*0.8; d[o+3]=255; }
+    g.putImageData(img,0,0); return cv;
+  }
+  function st(t,c){ return [t,c[0],c[1],c[2]]; }
+  var K=[16,13,12];
+  for(var pc=0;pc<12;pc++){                 /* C is red; each semitone turns the colour wheel 30 degrees */
+    var H=pc*30;
+    FIELDS.push(build([st(0,K),st(.26,hsl(H,.4,.07)),st(.38,hsl(H,.85,.24)),st(.48,hsl(H,.9,.46)),st(.60,hsl(H+22,.95,.54)),
+      st(.70,hsl(H+34,.9,.70)),st(.755,hsl(H+34,.6,.89)),st(.80,hsl(H+22,.9,.58)),st(.88,hsl(H,.85,.40)),st(.95,hsl(H,.7,.15)),st(1,K)]));
+    var c=hsl(H,.85,.52); NOTE_RGB.push((c[0]|0)+','+(c[1]|0)+','+(c[2]|0));
+  }
+  FIELDS.push(build([[0,16,13,12],[.26,24,14,11],[.38,120,22,10],[.48,226,44,14],[.60,240,118,24],[.70,247,176,104],
+             [.755,244,228,212],[.80,243,150,60],[.88,196,40,14],[.95,70,18,10],[1,16,13,12]]));
 })();
 /* fine grain at screen resolution: light and dark specks on the ink, plus pinholes where the ink missed the paper */
 function noiseTile(fn){
@@ -226,7 +247,7 @@ function inkGlyph(c,g,alphaMul,scale,blur){
   cctx.fillText(g.ch,0,0);
   cctx.restore();
   cctx.globalCompositeOperation='source-in';
-  cctx.drawImage(gradLayer,g.gx,g.gy,g.gs,g.gs,0,0,n,n);
+  cctx.drawImage(FIELDS[g.pc<0?12:g.pc],g.gx,g.gy,g.gs,g.gs,0,0,n,n);
   c.drawImage(cell,Math.round((g.x+g.w/2)*P-bx),Math.round(g.y*P-by));
 }
 function rebuild(){
@@ -290,20 +311,27 @@ function colLayout(){
 function colReset(){ C.lines=[]; C.line=null; C.col=0; C.row=0; C.n=0; C.started=false; C.cap=true; }
 function colMeasure(str){ mcan.font='400 100px '+SANS; return mcan.measureText(str).width/100*C.fs; }
 function drawColLine(c,L){
-  var fs=C.fs*P, lh=C.lh*P, x=L.x*P, y=L.y*P;
+  var fs=C.fs*P, lh=C.lh*P, x=L.x*P, y=L.y*P, i;
   var x0=x-fs*0.35, top=Math.round(y-lh*0.76), h=Math.ceil(lh), solid=L.w*P+fs*0.7, tail=L.tail*fs;
-  var gr=c.createLinearGradient(x0,0,x0+solid,0);
-  gr.addColorStop(0,'rgba('+L.color+','+L.a+')'); gr.addColorStop(1,'rgba('+L.color+','+(L.a*0.5)+')');
+  /* one colour stop per letter, so the bar is the line's melody read left to right */
+  var gr=c.createLinearGradient(x0,0,x0+solid,0), last=L.color;
+  for(i=0;i<L.chars.length;i++){
+    var ch=L.chars[i], pos=Math.max(0,Math.min(1,i===0?0:(ch.x*P+fs*0.6)/solid));
+    last=ch.pc<0?L.color:NOTE_RGB[ch.pc];
+    gr.addColorStop(pos,'rgba('+last+','+(L.a*(1-0.5*pos)).toFixed(3)+')');
+  }
+  gr.addColorStop(1,'rgba('+last+','+(L.a*0.5).toFixed(3)+')');
   c.fillStyle=gr; c.fillRect(x0,top,solid,h);
   /* halftone tail: three rows of dots that shrink as the bar runs out */
   var d=h/3, n=Math.max(1,Math.floor(tail/d));
-  c.fillStyle='rgba('+L.color+','+(L.a*0.5)+')';
+  c.fillStyle='rgba('+last+','+(L.a*0.5)+')';
   for(var k=0;k<n;k++){
     var r=d*0.5*(1-k/n)*0.95; if(r<0.3) break;
     for(var j=0;j<3;j++){ c.beginPath(); c.arc(x0+solid+d*(k+0.5),top+d*(j+0.5),r,0,6.2832); c.fill(); }
   }
   c.font='400 '+fs+'px '+SANS; c.textAlign='left'; c.textBaseline='alphabetic'; c.fillStyle='#1c1916';
-  c.fillText(L.text,x,y);
+  for(i=0;i<L.chars.length;i++){ c.globalAlpha=L.chars[i].a; c.fillText(L.chars[i].ch,x+L.chars[i].x*P,y); }
+  c.globalAlpha=1;
 }
 function colEndLine(){ if(C.line){ drawColLine(lctx,C.line); C.line=null; } }
 function colNewLine(strength,centroid){
@@ -316,7 +344,7 @@ function colNewLine(strength,centroid){
     C.started=true; C.n=0; C.max=2+Math.floor(Math.random()*5); C.cap=true;
     C.color=HUES[Math.max(0,Math.min(3,Math.floor(centroid*4)))];
   }
-  C.line={x:C.mx+C.col*C.pitch,y:C.my+C.row*C.paraH+C.n*C.lh,text:'',w:0,color:C.color,
+  C.line={x:C.mx+C.col*C.pitch,y:C.my+C.row*C.paraH+C.n*C.lh,text:'',chars:[],w:0,color:C.color,
           a:Math.max(0.16,(0.4+0.55*Math.min(1,strength))*(1-0.13*C.n)),tail:1.5+Math.min(1,strength)*7};
   C.n++; C.lines.push(C.line);
 }
@@ -328,6 +356,7 @@ function colStamp(idx,strength,centroid,now){
   var ch=LETTERS[idx], t=C.line.text+(space&&C.line.text?' ':'')+ch;
   if(colMeasure(t)>C.cw){ colEndLine(); colNewLine(strength,centroid); t=ch; }
   var upper=C.cap; if(upper){ t=t.slice(0,-1)+ch.toUpperCase(); C.cap=false; }
+  C.line.chars.push({ch:t.slice(-1),x:colMeasure(t.slice(0,-1)),a:Math.max(0.22,volAlpha(strength)),pc:notePc});
   C.line.text=t; C.line.w=colMeasure(t);
   spans[idx].classList.add('hit'); setTimeout(function(){spans[idx].classList.remove('hit')},160);
   keySound(Math.min(1,strength),idx,(C.line.x+C.line.w)*2-1,upper);
@@ -496,6 +525,30 @@ function wakeAudio(){ if(soundOn||audio){ try{ ensureAudio(); audio.resume(); }c
 document.addEventListener('pointerdown',wakeAudio); document.addEventListener('keydown',wakeAudio);
 sndBtn.addEventListener('click',function(){ soundOn=!soundOn; sndBtn.setAttribute('aria-pressed',soundOn); });
 
+/* ---------- which note is sounding: strongest spectral peak, pulled down to its fundamental, folded to one of 12 pitch classes ---------- */
+var notePc=-1, fbuf=null, noteEl=$('note');
+function detectNote(bandIdx){
+  if(mode==='demo') return (Math.round(69+12*Math.log(F0*Math.exp(Math.log(F1/F0)*(bandIdx+0.5)/N)/440)/Math.LN2)%12+12)%12;
+  if(!analyser) return -1;
+  if(!fbuf) fbuf=new Float32Array(analyser.frequencyBinCount);
+  analyser.getFloatFrequencyData(fbuf);
+  var hz=audio.sampleRate/analyser.fftSize, lo=Math.max(2,Math.round(70/hz)), hi=Math.min(fbuf.length-2,Math.round(1600/hz));
+  var k=lo, sum=0, i;
+  for(i=lo;i<=hi;i++){ sum+=fbuf[i]; if(fbuf[i]>fbuf[k]) k=i; }
+  if(fbuf[k]<-72||fbuf[k]-sum/(hi-lo+1)<17) return -1;         /* too quiet, or noise with no clear pitch */
+  /* the loudest partial is often an overtone: prefer a strong peak at a third or half of its frequency */
+  var pk=fbuf[k];
+  [3,2].some(function(div){
+    var j=Math.round(k/div); if(j<lo) return false;
+    var best=j; for(i=j-1;i<=j+1;i++){ if(fbuf[i]>fbuf[best]) best=i; }
+    if(fbuf[best]>pk-13&&fbuf[best]>=fbuf[best-1]&&fbuf[best]>=fbuf[best+1]){ k=best; return true; }
+    return false;
+  });
+  var a=fbuf[k-1], b=fbuf[k], c=fbuf[k+1], den=a-2*b+c, off=den?0.5*(a-c)/den:0;   /* parabolic fit between bins */
+  var f=(k+Math.max(-0.5,Math.min(0.5,off)))*hz;
+  return (Math.round(69+12*Math.log(f/440)/Math.LN2)%12+12)%12;
+}
+
 /* ---------- frequency -> letter ---------- */
 var avg=new Float32Array(N), show=new Float32Array(N);
 var floor=new Float32Array(N), calibUntil=0, deafUntil=0;   /* room-noise level per band; settle time; time the mic ignores our own key click */
@@ -538,6 +591,7 @@ function frame(now){
       /* a held note does not stutter: same letter repeats only on a new attack or after a pause */
       if(best===lastIdx&&now-lastStamp<420&&e[best]<=lastE*1.15){ best=(second>=0&&ss>bs*0.45)?second:-1; }
       if(best>=0){
+        notePc=detectNote(best); noteEl.textContent=notePc<0?'\u00a0':NOTE_NAMES[notePc];
         stamp(best,e[best],centroid,now);
         lastIdx=best; lastE=e[best]; lastStamp=now;
         if(live&&soundOn&&audio&&audio.state==='running') deafUntil=now+outLatency()+110;   /* do not let the mic type from the click it just made */
