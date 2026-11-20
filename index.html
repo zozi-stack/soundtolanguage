@@ -156,22 +156,41 @@ var scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
 /* grainy black / red / orange field the letters are cut from; built once, small, so the grain stays coarse */
 var gradLayer=document.createElement('canvas'), GROW=1.35;
 (function(){
-  var w=560, h=840; gradLayer.width=w; gradLayer.height=h;
-  var g=gradLayer.getContext('2d');
-  g.fillStyle='#15110f'; g.fillRect(0,0,w,h);
-  var blobs=[[.18,.10,.58,.26,-.45,'232,50,14'],[.78,.27,.72,.22,-.5,'240,122,26'],[.30,.50,.62,.22,-.4,'214,38,18'],
-             [.82,.70,.66,.24,-.5,'242,140,40'],[.22,.90,.62,.24,-.45,'225,60,20']];
-  blobs.forEach(function(b){
-    var r=b[2]*w;
-    g.save(); g.translate(b[0]*w,b[1]*h); g.rotate(b[4]); g.scale(1,b[3]/b[2]);
-    var rg=g.createRadialGradient(0,0,0,0,0,r);
-    rg.addColorStop(0,'rgba('+b[5]+',1)'); rg.addColorStop(.45,'rgba('+b[5]+',.8)'); rg.addColorStop(1,'rgba('+b[5]+',0)');
-    g.fillStyle=rg; g.fillRect(-r,-r,2*r,2*r); g.restore();
-  });
-  var img=g.getImageData(0,0,w,h), d=img.data;
-  for(var i=0;i<d.length;i+=4){ var n=(Math.random()-.5)*80; d[i]+=n; d[i+1]+=n; d[i+2]+=n; }
+  var w=640, h=960; gradLayer.width=w; gradLayer.height=h;
+  var g=gradLayer.getContext('2d'), img=g.createImageData(w,h), d=img.data;
+  /* colour ramp: black, ember, red, orange, a thin pale flare, back down to black */
+  var stops=[[0,16,13,12],[.26,24,14,11],[.38,120,22,10],[.48,226,44,14],[.60,240,118,24],[.70,247,176,104],
+             [.755,244,228,212],[.80,243,150,60],[.88,196,40,14],[.95,70,18,10],[1,16,13,12]];
+  var ramp=new Uint8Array(256*3);
+  for(var k=0;k<256;k++){
+    var t=k/255, a=0; while(a<stops.length-2&&t>stops[a+1][0]) a++;
+    var A=stops[a], B=stops[a+1], f=(t-A[0])/(B[0]-A[0]); f=f*f*(3-2*f);
+    for(var c=0;c<3;c++) ramp[k*3+c]=A[c+1]+(B[c+1]-A[c+1])*f;
+  }
+  /* warped sine field: long liquid bands with finer ripples riding on them */
+  for(var y=0;y<h;y++){
+    for(var x=0;x<w;x++){
+      var u=x/w*7, v=y/w*7;
+      var wx=u+0.95*Math.sin(v*1.25+1.7)+0.38*Math.sin(v*2.9+u*1.1)+0.12*Math.sin(v*7.3-u*4.1);
+      var wy=v+0.85*Math.sin(u*1.05+0.4)+0.33*Math.sin(u*3.1-v*0.7+2)+0.10*Math.sin(u*6.7+v*5.3);
+      var tt=0.5+0.5*Math.sin(wx*1.55+wy*1.05+0.7*Math.sin(wx*0.7-wy*1.9)+0.25*Math.sin(wx*4.3+wy*3.7));
+      var shade=0.5+0.5*Math.sin(wx*0.45-wy*0.6+1.1);            /* slow drift between darker and hotter regions */
+      tt=Math.max(0,Math.min(1,tt*(0.72+0.28*shade)));
+      var q=(tt*255|0)*3, o=(y*w+x)*4, n=(Math.random()-.5)*95;  /* coarse grain baked into the field */
+      d[o]=ramp[q]+n; d[o+1]=ramp[q+1]+n*0.9; d[o+2]=ramp[q+2]+n*0.8; d[o+3]=255;
+    }
+  }
   g.putImageData(img,0,0);
 })();
+/* fine grain at screen resolution: light and dark specks on the ink, plus pinholes where the ink missed the paper */
+function noiseTile(fn){
+  var c=document.createElement('canvas'); c.width=c.height=256;
+  var x=c.getContext('2d'), im=x.createImageData(256,256), p=im.data;
+  for(var i=0;i<p.length;i+=4) fn(p,i);
+  x.putImageData(im,0,0); return ctx.createPattern(c,'repeat');
+}
+var speckle=noiseTile(function(p,i){ var v=Math.random()<.5?255:0; p[i]=p[i+1]=p[i+2]=v; p[i+3]=Math.random()*Math.random()*150; });
+var pinhole=noiseTile(function(p,i){ p[i+3]=Math.random()<0.13?70+Math.random()*150:0; });
 function setFont(c){ c.font='500 '+(FS*P)+'px '+FONT; c.textAlign='center'; c.textBaseline='alphabetic'; c.fillStyle='#1c1916'; }
 function drawGlyph(c,g,alphaMul,scale,blur){
   c.save();
@@ -218,6 +237,8 @@ function render(now){
   var ox=reduced?0:(0.5+0.5*Math.sin(now/9000))*spare*P, oy=reduced?0:(0.5+0.5*Math.cos(now/13000))*spare*H;
   sctx.globalCompositeOperation='source-in';
   sctx.drawImage(gradLayer,-ox,-oy,P*GROW,H*GROW);
+  sctx.globalCompositeOperation='source-atop'; sctx.fillStyle=speckle; sctx.fillRect(0,0,scratch.width,scratch.height);
+  sctx.globalCompositeOperation='destination-out'; sctx.fillStyle=pinhole; sctx.fillRect(0,0,scratch.width,scratch.height);
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.drawImage(ghostLayer,0,0); ctx.drawImage(scratch,0,0);
 }
