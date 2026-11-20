@@ -72,7 +72,7 @@ input[type=range]{width:110px;accent-color:var(--ink)}
 <body class="bare">
 <header>
   <h1>Sound Letterpress</h1>
-  <p id="status" role="status" aria-live="polite">Demo signal, no sound. Pick an input below.</p>
+  <p id="status" role="status" aria-live="polite">Waiting for the microphone.</p>
 </header>
 
 <button id="uiBtn" type="button" aria-pressed="false" title="Key: H">Show controls</button>
@@ -91,7 +91,7 @@ input[type=range]{width:110px;accent-color:var(--ink)}
 <div class="controls">
   <button id="micBtn" type="button" aria-pressed="false" title="Key: M">Use microphone</button>
   <label class="file" id="fileLabel" title="Key: F">Play an audio file<input id="fileIn" type="file" accept="audio/*"></label>
-  <button id="demoBtn" type="button" aria-pressed="true" title="Key: D">Demo signal</button>
+  <button id="demoBtn" type="button" aria-pressed="false" title="Key: D">Demo signal</button>
   <button id="sndBtn" type="button" aria-pressed="true" title="Key: S">Typing sound</button>
   <label class="sens" for="sens">Sensitivity <input id="sens" type="range" min="0.5" max="3" step="0.1" value="1.3"></label>
   <button id="clearBtn" type="button" class="quiet" title="Key: C">Fresh sheet</button>
@@ -141,16 +141,16 @@ function newLine(centroid){
 function stamp(idx,strength,centroid,now){
   var ch=LETTERS[idx];
   if(pendingBreak&&cx>LEFT){ newLine(centroid); capNext=true; }
-  else if(pendingSpace&&cx>LEFT){ cx+=FS*0.3+track*0.6; spaceSound(); }
+  else if(pendingSpace&&cx>LEFT){ cx+=FS*0.3+track*0.6; }
   pendingBreak=pendingSpace=false;
   if(capNext){ ch=ch.toUpperCase(); capNext=false; }
   var w=widths[ch]||FS*0.5, gs;
   if(cx+w>RIGHT) newLine(centroid);
   glyphs.push({ch:ch,x:cx,w:w,y:TOP+(line+1)*LH+(Math.random()-.5)*FS*0.035,
-    a:0.74+0.26*Math.min(1,strength),r:(Math.random()-.5)*0.04,t:now,done:false,
+    a:0.74+0.26*Math.min(1,strength),r:(Math.random()-.5)*0.04,t:now+outLatency(),done:false,
     gs:(gs=380+Math.random()*180),gx:Math.random()*(640-gs),gy:Math.random()*(960-gs)});
+  keySound(Math.min(1,strength),idx,(cx-LEFT)/(RIGHT-LEFT)*2-1,ch!==LETTERS[idx]);
   cx+=w+track;
-  keySound(Math.min(1,strength));
   spans[idx].classList.add('hit');
   setTimeout(function(){spans[idx].classList.remove('hit')},160);
 }
@@ -249,6 +249,7 @@ function render(now){
   sctx.drawImage(inkLayer,0,0);
   for(var i=glyphs.length-1;i>=0;i--){
     var g=glyphs[i]; if(g.done) break;
+    if(now<g.t) continue;                    /* held back by the speaker delay so ink and click land together */
     var age=(now-g.t)/70;
     if(reduced||age>=1){ g.done=true; inkGlyph(ictx,g,1,1,0); inkGlyph(sctx,g,1,1,0); continue; }
     inkGlyph(sctx,g,1,1.1-0.1*age,0);        /* hard strike: full ink at once, brief recoil */
@@ -263,7 +264,7 @@ function render(now){
 
 /* ---------- sound sources: each returns 26 band energies, 0..1 ---------- */
 var out=new Float32Array(N), audio=null, analyser=null, bytes=null, binLo=[], binHi=[];
-var micStream=null, micNode=null, elNode=null, mode='demo';
+var micStream=null, micNode=null, elNode=null, mode='idle';
 function ensureAudio(){
   if(audio) return;
   var AC=window.AudioContext||window.webkitAudioContext;
@@ -286,6 +287,7 @@ function analyserBands(){
   }
   return out;
 }
+function silence(){ out.fill(0); return out; }
 var demo={peak:9,env:0,next:0};
 function demoBands(now){
   if(now>=demo.next){
@@ -315,22 +317,17 @@ function setMode(m,msg,warn){
   avg.fill(0);
 }
 function useMic(auto){
-  if(mode==='mic'){ stopInputs(); setMode('demo','Demo signal, no sound.'); return; }
+  if(mode==='mic'){ stopInputs(); setMode('idle','Microphone off.'); return; }
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    setMode('demo','This browser gives the page no microphone. Play an audio file instead.',!auto); return;
+    setMode('idle','This browser gives the page no microphone. Play an audio file instead.',true); return;
   }
   navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:false,autoGainControl:false}})
   .then(function(stream){
     ensureAudio(); stopInputs(); audio.resume();
-    /* some browsers keep audio asleep until the first tap or key press */
-    if(audio.state!=='running'){
-      var kick=function(){ audio.resume(); document.removeEventListener('pointerdown',kick); document.removeEventListener('keydown',kick); };
-      document.addEventListener('pointerdown',kick); document.addEventListener('keydown',kick);
-    }
     micStream=stream; micNode=audio.createMediaStreamSource(stream); micNode.connect(analyser);
-    setMode('mic','Listening. Whistle a scale and the letters walk the alphabet.');
+    setMode('mic',audio.state==='running'?'Listening.':'Listening. Click the page once if nothing types.');
   }).catch(function(){
-    setMode('demo',auto?'Demo signal, no sound. The microphone is unavailable or was declined.':'Microphone is blocked here. Allow it in the browser\'s site settings, or play an audio file.',!auto);
+    setMode('idle','No microphone access. Allow it in the browser\'s site settings, then press Use microphone.',true);
   });
 }
 function useFile(file){
@@ -340,11 +337,11 @@ function useFile(file){
     if(!elNode){ elNode=audio.createMediaElementSource(player); elNode.connect(analyser); elNode.connect(audio.destination); }
     player.src=URL.createObjectURL(file);
     player.play().then(function(){ setMode('file','Printing '+file.name+'.'); })
-      .catch(function(){ setMode('demo','That file would not play. Try an MP3, WAV or M4A.',true); });
-  }catch(e){ setMode('demo','That file would not play. Try an MP3, WAV or M4A.',true); }
+      .catch(function(){ setMode('idle','That file would not play. Try an MP3, WAV or M4A.',true); });
+  }catch(e){ setMode('idle','That file would not play. Try an MP3, WAV or M4A.',true); }
 }
 micBtn.addEventListener('click',function(){ useMic(false); });
-demoBtn.addEventListener('click',function(){ stopInputs(); setMode('demo','Demo signal, no sound.'); });
+demoBtn.addEventListener('click',function(){ var on=mode!=='demo'; stopInputs(); setMode(on?'demo':'idle',on?'Demo signal: made-up notes, not your sound.':'Demo off.'); });
 fileIn.addEventListener('change',function(){ useFile(fileIn.files[0]); fileIn.value=''; });
 $('clearBtn').addEventListener('click',function(){ resetSheet(); rebuild(); });
 ['dragenter','dragover'].forEach(function(ev){ document.addEventListener(ev,function(e){e.preventDefault();paper.classList.add('drop');}); });
@@ -363,20 +360,36 @@ function soundReady(){
   }
   return true;
 }
-function burst(type,freq,q,gain,dur,rate){
-  var t=audio.currentTime, src=audio.createBufferSource(), f=audio.createBiquadFilter(), g=audio.createGain();
+function outLatency(){                     /* how long the speakers lag behind the code, in ms */
+  if(!soundOn||!audio||audio.state!=='running') return 0;
+  return Math.min(250,((audio.outputLatency||0)+(audio.baseLatency||0))*1000);
+}
+function burst(type,freq,q,gain,dur,rate,dest,delay){
+  var t=audio.currentTime+(delay||0), src=audio.createBufferSource(), f=audio.createBiquadFilter(), g=audio.createGain();
   src.buffer=noiseBuf; src.playbackRate.value=rate||1;
   f.type=type; f.frequency.value=freq; f.Q.value=q;
   g.gain.setValueAtTime(gain,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-  src.connect(f); f.connect(g); g.connect(audio.destination);
+  src.connect(f); f.connect(g); g.connect(dest||audio.destination);
   src.start(t,Math.random()*0.6,dur+0.02);
 }
-function keySound(v){                      /* type bar hits the platen: sharp click over a low thock */
-  if(!soundReady()) return; v=0.55+0.45*v;
-  burst('bandpass',2300+Math.random()*1500,1.2,0.26*v,0.03,0.9+Math.random()*0.3);
-  burst('lowpass',240+Math.random()*90,0.8,0.55*v,0.055,1);
+/* Each strike is built fresh so no two sound alike: the letter sets its pitch (a is a deep thock, z a bright tick),
+   the note's loudness sets the force, the position on the line pans it like a moving carriage,
+   and the click length, resonance, metal ring and key bounce are rolled per strike. */
+function keySound(v,idx,pan,upper){
+  if(!soundReady()) return;
+  var R=Math.random, hi=idx/25, dest=audio.destination;
+  v=(0.5+0.5*v)*(0.85+0.3*R());
+  if(audio.createStereoPanner){ var pn=audio.createStereoPanner(); pn.pan.value=Math.max(-1,Math.min(1,pan*0.7)); pn.connect(dest); dest=pn; }
+  burst('bandpass',1500+hi*2600+R()*700,0.9+R()*1.4,(0.2+0.1*R())*v,0.018+R()*0.024,0.8+R()*0.5,dest);
+  burst('lowpass',(330-hi*150)*(upper?0.8:1)+R()*50,0.7+R()*0.5,(0.42+0.2*R())*v*(upper?1.4:1),0.04+R()*0.04,1,dest);
+  if(R()<0.5){                             /* type bar rings */
+    var t=audio.currentTime, o=audio.createOscillator(), g=audio.createGain();
+    o.type='triangle'; o.frequency.value=3000+R()*2400;
+    g.gain.setValueAtTime(0.03*v,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.025+R()*0.03);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.07);
+  }
+  if(R()<0.22) burst('bandpass',2600+R()*1500,1.5,0.07*v,0.02,1.1,dest,0.012+R()*0.008);   /* key bounce */
 }
-function spaceSound(){ if(soundReady()) burst('lowpass',190,0.8,0.4,0.07,1); }
 function returnSound(){                    /* margin bell, then the carriage sliding back */
   if(!soundReady()) return;
   var t=audio.currentTime, o=audio.createOscillator(), g=audio.createGain();
@@ -394,7 +407,7 @@ var avg=new Float32Array(N), show=new Float32Array(N);
 var GATE=0.15, nextAt=0, lastSound=0, lastIdx=-1, lastE=0, lastStamp=0, pendingSpace=false, pendingBreak=false, prev=0;
 function frame(now){
   var dt=Math.min(100,now-prev||16); prev=now;
-  var e=(mode==='demo')?demoBands(now):analyserBands();
+  var e=mode==='demo'?demoBands(now):(mode==='idle'||!analyser)?silence():analyserBands();
   var peak=0, sum=0, wsum=0, i;
   for(i=0;i<N;i++){
     if(e[i]>peak) peak=e[i];
@@ -422,7 +435,7 @@ function frame(now){
       if(best>=0){
         stamp(best,e[best],centroid,now);
         lastIdx=best; lastE=e[best]; lastStamp=now;
-        nextAt=now+190-140*Math.min(1,peak);
+        nextAt=now+200-115*Math.min(1,peak);   /* never faster than a typist: each strike stays a separate sound */
       }
     }
   }
@@ -447,7 +460,7 @@ document.addEventListener('keydown',function(e){
   else if(k==='c') $('clearBtn').click(); else if(k==='f') fileIn.click();
 });
 
-function start(){ measure(); resize(); requestAnimationFrame(frame); useMic(true); }   /* microphone is the default input; the demo runs until it is allowed */
+function start(){ measure(); resize(); requestAnimationFrame(frame); useMic(true); }   /* microphone is the input; the sheet stays blank until it hears something */
 /* installed app: fetches the newest version whenever it is online */
 if('serviceWorker' in navigator&&location.protocol==='https:'){ try{ navigator.serviceWorker.register('sw.js').catch(function(){}); }catch(e){} }
 window.addEventListener('resize',resize);
