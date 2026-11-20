@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound Letterpress</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#dedbd6">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: one sheet of paper centred on a pale desk; alphabet-as-spectrum rule and controls beneath. Single theme by choice. */
+  color-scheme: light;
+  --desk:#e7e3e8;
+  --paper:#dedbd6;
+  --ink:#1c1916;
+  --ink-soft:#6f6a66;
+  --rule:#c6c1c4;
+  --proof:#a8281f;
+  --serif:"EB Garamond","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--desk);color:var(--ink);font-family:var(--serif);
+  display:flex;flex-direction:column;
+  -webkit-font-smoothing:antialiased;
+}
+header,.bar{position:fixed;left:0;right:0;z-index:2;background:rgba(222,219,214,.92);transition:opacity .3s}
+header{top:0;padding:12px 150px 12px 20px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 24px}
+.bar{bottom:0;padding:12px 20px 14px;display:flex;flex-direction:column;gap:12px}
+body.bare header,body.bare .bar{opacity:0;pointer-events:none;visibility:hidden}
+#uiBtn{position:fixed;top:9px;right:14px;z-index:3;background:rgba(222,219,214,.92)}
+body.bare #uiBtn{opacity:.4}
+body.bare #uiBtn:hover,body.bare #uiBtn:focus-visible{opacity:1}
+@media (prefers-reduced-motion: reduce){header,.bar{transition:none}}
+h1{margin:0;font-size:1.15rem;font-weight:500;letter-spacing:.02em}
+#status{margin:0;font-size:.95rem;font-style:italic;color:var(--ink-soft)}
+#status.warn{color:var(--proof)}
+.stage{flex:1;min-height:0;overflow:hidden}
+.paper{
+  position:relative;background-color:var(--paper);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .2  0 0 0 0 .18  0 0 0 0 .16  0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+  box-shadow:0 1px 0 rgba(255,255,255,.55) inset,0 18px 40px -22px rgba(40,30,45,.35),0 2px 5px rgba(40,30,45,.08);
+}
+.paper.drop{outline:1px dashed var(--ink-soft);outline-offset:-14px}
+canvas{display:block;width:100%;height:100%}
+.spectrum{display:flex;align-items:baseline;gap:10px;justify-content:center;font-size:.8rem;color:var(--ink-soft)}
+.spectrum .hz{white-space:nowrap;font-variant-numeric:tabular-nums}
+#alphabet{display:flex;gap:clamp(1px,1.1vw,9px);font-size:clamp(.85rem,2.6vw,1.15rem);color:var(--ink)}
+#alphabet span{opacity:.18;width:.72em;text-align:center}
+#alphabet span.hit{color:var(--proof)}
+.controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 10px}
+button,.file{
+  font:inherit;font-size:.95rem;color:var(--ink);background:transparent;cursor:pointer;
+  border:1px solid var(--ink);border-radius:2px;padding:5px 12px 6px;line-height:1.2;
+}
+button:hover,.file:hover{background:rgba(28,25,22,.07)}
+button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+button.quiet{border-color:var(--rule);color:var(--ink-soft)}
+button:focus-visible,.file:focus-within,input:focus-visible{outline:2px solid var(--proof);outline-offset:2px}
+.file input{position:absolute;width:1px;height:1px;opacity:0}
+.sens{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink-soft)}
+input[type=range]{width:110px;accent-color:var(--ink)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Sound Letterpress</h1>
+  <p id="status" role="status" aria-live="polite">Demo signal, no sound. Pick an input below.</p>
+</header>
+
+<button id="uiBtn" type="button" aria-pressed="true" title="Key: H">Hide controls</button>
+
+<div class="stage" id="stage">
+  <div class="paper" id="paper"><canvas id="sheet" aria-label="Sheet of paper with letters stamped by sound"></canvas></div>
+</div>
+
+<div class="bar">
+<div class="spectrum" aria-hidden="true">
+  <span class="hz">80 Hz</span>
+  <div id="alphabet"></div>
+  <span class="hz">8 kHz</span>
+</div>
+
+<div class="controls">
+  <button id="micBtn" type="button" aria-pressed="false" title="Key: M">Use microphone</button>
+  <label class="file" id="fileLabel" title="Key: F">Play an audio file<input id="fileIn" type="file" accept="audio/*"></label>
+  <button id="demoBtn" type="button" aria-pressed="true" title="Key: D">Demo signal</button>
+  <label class="sens" for="sens">Sensitivity <input id="sens" type="range" min="0.5" max="3" step="0.1" value="1.3"></label>
+  <button id="clearBtn" type="button" class="quiet" title="Key: C">Fresh sheet</button>
+</div>
+</div>
+<audio id="player" loop></audio>
+
+<script>
+(function(){
+'use strict';
+var N=26, F0=80, F1=8000, LETTERS='abcdefghijklmnopqrstuvwxyz';
+var $=function(id){return document.getElementById(id)};
+var stage=$('stage'), paper=$('paper'), canvas=$('sheet'), ctx=canvas.getContext('2d');
+var statusEl=$('status'), micBtn=$('micBtn'), demoBtn=$('demoBtn'), fileIn=$('fileIn'), player=$('player'), sens=$('sens');
+var reduced=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var FONT='"EB Garamond","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif';
+
+/* ---------- alphabet rule ---------- */
+var alpha=$('alphabet'), spans=[];
+for(var i=0;i<N;i++){var s=document.createElement('span');s.textContent=LETTERS[i];alpha.appendChild(s);spans.push(s);}
+
+/* ---------- typesetting, in units of paper width (sheet is 1 x 1.5) ---------- */
+var ASPECT=1.5, FS, LH, LEFT, RIGHT, TOP, BOTTOM, MAXLINES;
+function layout(aspect){
+  ASPECT=aspect;
+  FS=0.06*Math.max(0.3,Math.min(1,aspect/1.5));   /* wide windows get smaller type, more per line */
+  LH=FS*1.06; LEFT=FS*2.2; RIGHT=1-LEFT; TOP=FS*1.6; BOTTOM=aspect-FS*2.2;
+  MAXLINES=Math.max(1,Math.floor((BOTTOM-TOP)/LH));
+}
+layout(1.5);
+function resetSheet(){ glyphs=[]; ghost=[]; line=0; cx=LEFT; capNext=true; track=FS*0.12; }
+var glyphs=[], ghost=[], line=0, cx=0, track=0, capNext=true;
+var widths={}, mcan=document.createElement('canvas').getContext('2d');
+function measure(){
+  mcan.font='500 100px '+FONT; widths={};
+  var all=LETTERS+LETTERS.toUpperCase();
+  for(var i=0;i<all.length;i++) widths[all[i]]=mcan.measureText(all[i]).width/100*FS;
+}
+function newLine(centroid){
+  line++; cx=LEFT;
+  track=FS*(0.02+0.6*Math.pow(centroid,1.3));
+  if(line>=MAXLINES){ ghost=glyphs; glyphs=[]; line=0; rebuild(); }
+}
+function stamp(idx,strength,centroid,now){
+  var ch=LETTERS[idx];
+  if(pendingBreak&&cx>LEFT){ newLine(centroid); capNext=true; }
+  else if(pendingSpace&&cx>LEFT){ cx+=FS*0.3+track*0.6; }
+  pendingBreak=pendingSpace=false;
+  if(capNext){ ch=ch.toUpperCase(); capNext=false; }
+  var w=widths[ch]||FS*0.5;
+  if(cx+w>RIGHT) newLine(centroid);
+  glyphs.push({ch:ch,x:cx,w:w,y:TOP+(line+1)*LH+(Math.random()-.5)*FS*0.035,
+    a:0.74+0.26*Math.min(1,strength),r:(Math.random()-.5)*0.04,t:now,done:false});
+  cx+=w+track;
+  spans[idx].classList.add('hit');
+  setTimeout(function(){spans[idx].classList.remove('hit')},160);
+}
+
+/* ---------- drawing ---------- */
+var P=0, dpr=1, inkLayer=document.createElement('canvas'), ghostLayer=document.createElement('canvas');
+var ictx=inkLayer.getContext('2d'), gctx=ghostLayer.getContext('2d');
+var scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
+/* grainy black / red / orange field the letters are cut from; built once, small, so the grain stays coarse */
+var gradLayer=document.createElement('canvas'), GROW=1.35;
+(function(){
+  var w=560, h=840; gradLayer.width=w; gradLayer.height=h;
+  var g=gradLayer.getContext('2d');
+  g.fillStyle='#15110f'; g.fillRect(0,0,w,h);
+  var blobs=[[.18,.10,.58,.26,-.45,'232,50,14'],[.78,.27,.72,.22,-.5,'240,122,26'],[.30,.50,.62,.22,-.4,'214,38,18'],
+             [.82,.70,.66,.24,-.5,'242,140,40'],[.22,.90,.62,.24,-.45,'225,60,20']];
+  blobs.forEach(function(b){
+    var r=b[2]*w;
+    g.save(); g.translate(b[0]*w,b[1]*h); g.rotate(b[4]); g.scale(1,b[3]/b[2]);
+    var rg=g.createRadialGradient(0,0,0,0,0,r);
+    rg.addColorStop(0,'rgba('+b[5]+',1)'); rg.addColorStop(.45,'rgba('+b[5]+',.8)'); rg.addColorStop(1,'rgba('+b[5]+',0)');
+    g.fillStyle=rg; g.fillRect(-r,-r,2*r,2*r); g.restore();
+  });
+  var img=g.getImageData(0,0,w,h), d=img.data;
+  for(var i=0;i<d.length;i+=4){ var n=(Math.random()-.5)*80; d[i]+=n; d[i+1]+=n; d[i+2]+=n; }
+  g.putImageData(img,0,0);
+})();
+function setFont(c){ c.font='500 '+(FS*P)+'px '+FONT; c.textAlign='center'; c.textBaseline='alphabetic'; c.fillStyle='#1c1916'; }
+function drawGlyph(c,g,alphaMul,scale,blur){
+  c.save();
+  c.translate((g.x+g.w/2)*P,g.y*P); c.rotate(g.r); c.scale(scale,scale);
+  c.globalAlpha=g.a*alphaMul;
+  if(blur>0){ c.shadowColor='rgba(28,25,22,.9)'; c.shadowBlur=blur; }
+  c.fillText(g.ch,0,0);
+  c.restore();
+}
+function rebuild(){
+  ictx.clearRect(0,0,inkLayer.width,inkLayer.height);
+  gctx.clearRect(0,0,ghostLayer.width,ghostLayer.height);
+  setFont(ictx); setFont(gctx);
+  for(var i=0;i<glyphs.length;i++){ if(glyphs[i].done) drawGlyph(ictx,glyphs[i],1,1,0); }
+  /* previous sheet shows through, mirrored, like print on the reverse */
+  gctx.save(); gctx.translate(ghostLayer.width,0); gctx.scale(-1,1);
+  for(var j=0;j<ghost.length;j++) drawGlyph(gctx,ghost[j],0.075,1,0);
+  gctx.restore();
+}
+function resize(){
+  var r=stage.getBoundingClientRect();
+  var w=Math.max(200,r.width), h=Math.max(200,r.height), aspect=h/w;
+  paper.style.width=w+'px'; paper.style.height=h+'px';
+  dpr=Math.min(window.devicePixelRatio||1,2);
+  P=Math.round(w*dpr);
+  [canvas,inkLayer,ghostLayer,scratch].forEach(function(c){c.width=P;c.height=Math.round(P*aspect);});
+  if(Math.abs(aspect-ASPECT)>0.015||!cx){ layout(aspect); measure(); resetSheet(); }   /* a new shape is a new sheet */
+  rebuild();
+}
+function render(now){
+  /* letters become a mask on the scratch layer, then the gradient is poured into them */
+  sctx.globalCompositeOperation='source-over';
+  sctx.clearRect(0,0,scratch.width,scratch.height);
+  sctx.drawImage(inkLayer,0,0);
+  setFont(sctx);
+  for(var i=glyphs.length-1;i>=0;i--){
+    var g=glyphs[i]; if(g.done) break;
+    var age=(now-g.t)/320;
+    if(reduced||age>=1){ g.done=true; setFont(ictx); drawGlyph(ictx,g,1,1,0); drawGlyph(sctx,g,1,1,0); continue; }
+    var k=1-Math.pow(1-age,3);               /* press in, wet ink settles */
+    drawGlyph(sctx,g,Math.min(1,age*3),1.22-0.22*k,(1-k)*5*dpr);
+  }
+  var H=P*ASPECT, spare=GROW-1;
+  var ox=reduced?0:(0.5+0.5*Math.sin(now/9000))*spare*P, oy=reduced?0:(0.5+0.5*Math.cos(now/13000))*spare*H;
+  sctx.globalCompositeOperation='source-in';
+  sctx.drawImage(gradLayer,-ox,-oy,P*GROW,H*GROW);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(ghostLayer,0,0); ctx.drawImage(scratch,0,0);
+}
+
+/* ---------- sound sources: each returns 26 band energies, 0..1 ---------- */
+var out=new Float32Array(N), audio=null, analyser=null, bytes=null, binLo=[], binHi=[];
+var micStream=null, micNode=null, elNode=null, mode='demo';
+function ensureAudio(){
+  if(audio) return;
+  var AC=window.AudioContext||window.webkitAudioContext;
+  audio=new AC();
+  analyser=audio.createAnalyser(); analyser.fftSize=4096; analyser.smoothingTimeConstant=0.55;
+  analyser.minDecibels=-95; analyser.maxDecibels=-25;
+  bytes=new Uint8Array(analyser.frequencyBinCount);
+  var hz=audio.sampleRate/analyser.fftSize, ratio=Math.log(F1/F0);
+  for(var i=0;i<N;i++){
+    var lo=F0*Math.exp(ratio*i/N), hi=F0*Math.exp(ratio*(i+1)/N);
+    binLo[i]=Math.max(1,Math.round(lo/hz)); binHi[i]=Math.max(binLo[i],Math.round(hi/hz)-1);
+  }
+}
+function analyserBands(){
+  analyser.getByteFrequencyData(bytes);
+  var gain=parseFloat(sens.value);
+  for(var i=0;i<N;i++){
+    var m=0; for(var b=binLo[i];b<=binHi[i];b++){ if(bytes[b]>m) m=bytes[b]; }
+    out[i]=Math.min(1,Math.max(0,(m/255-0.3)/0.7)*gain);
+  }
+  return out;
+}
+var demo={peak:9,env:0,next:0};
+function demoBands(now){
+  if(now>=demo.next){
+    var rest=Math.random()<0.16;
+    demo.peak=Math.max(0,Math.min(N-1,demo.peak+Math.round((Math.random()-.5)*10)));
+    if(Math.random()<0.15) demo.peak=Math.floor(Math.random()*N);
+    demo.env=rest?0:0.55+Math.random()*0.45;
+    demo.next=now+(rest?500+Math.random()*1300:120+Math.random()*250);
+  }
+  demo.env*=0.972;
+  var p2=(demo.peak+7)%N;
+  for(var i=0;i<N;i++){
+    var d=i-demo.peak, d2=i-p2;
+    out[i]=demo.env*(Math.exp(-d*d/1.5)+0.55*Math.exp(-d2*d2/1.2));
+  }
+  return out;
+}
+function stopInputs(){
+  if(micStream){ micStream.getTracks().forEach(function(t){t.stop()}); micStream=null; }
+  if(micNode){ try{micNode.disconnect()}catch(e){} micNode=null; }
+  player.pause();
+}
+function setMode(m,msg,warn){
+  mode=m;
+  micBtn.setAttribute('aria-pressed',m==='mic'); demoBtn.setAttribute('aria-pressed',m==='demo');
+  statusEl.textContent=msg; statusEl.classList.toggle('warn',!!warn); wake();
+  avg.fill(0);
+}
+function useMic(){
+  if(mode==='mic'){ stopInputs(); setMode('demo','Demo signal, no sound.'); return; }
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    setMode('demo','This browser gives the page no microphone. Play an audio file instead.',true); return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}})
+  .then(function(stream){
+    ensureAudio(); stopInputs(); audio.resume();
+    micStream=stream; micNode=audio.createMediaStreamSource(stream); micNode.connect(analyser);
+    setMode('mic','Listening. Whistle a scale and the letters walk the alphabet.');
+  }).catch(function(){
+    setMode('demo','Microphone is blocked in this view. Open the downloaded file in your browser, or play an audio file here.',true);
+  });
+}
+function useFile(file){
+  if(!file) return;
+  try{
+    ensureAudio(); stopInputs(); audio.resume();
+    if(!elNode){ elNode=audio.createMediaElementSource(player); elNode.connect(analyser); elNode.connect(audio.destination); }
+    player.src=URL.createObjectURL(file);
+    player.play().then(function(){ setMode('file','Printing '+file.name+'.'); })
+      .catch(function(){ setMode('demo','That file would not play. Try an MP3, WAV or M4A.',true); });
+  }catch(e){ setMode('demo','That file would not play. Try an MP3, WAV or M4A.',true); }
+}
+micBtn.addEventListener('click',useMic);
+demoBtn.addEventListener('click',function(){ stopInputs(); setMode('demo','Demo signal, no sound.'); });
+fileIn.addEventListener('change',function(){ useFile(fileIn.files[0]); fileIn.value=''; });
+$('clearBtn').addEventListener('click',function(){ resetSheet(); rebuild(); });
+['dragenter','dragover'].forEach(function(ev){ document.addEventListener(ev,function(e){e.preventDefault();paper.classList.add('drop');}); });
+['dragleave','drop'].forEach(function(ev){ document.addEventListener(ev,function(e){e.preventDefault();paper.classList.remove('drop');}); });
+document.addEventListener('drop',function(e){ var f=e.dataTransfer&&e.dataTransfer.files[0]; if(f&&/^audio\//.test(f.type)) useFile(f); });
+
+/* ---------- frequency -> letter ---------- */
+var avg=new Float32Array(N), show=new Float32Array(N);
+var GATE=0.15, nextAt=0, lastSound=0, lastIdx=-1, lastE=0, lastStamp=0, pendingSpace=false, pendingBreak=false, prev=0;
+function frame(now){
+  var dt=Math.min(100,now-prev||16); prev=now;
+  var e=(mode==='demo')?demoBands(now):analyserBands();
+  var peak=0, sum=0, wsum=0, i;
+  for(i=0;i<N;i++){
+    if(e[i]>peak) peak=e[i];
+    sum+=e[i]; wsum+=e[i]*i;
+    show[i]=Math.max(e[i],show[i]*0.88);
+    spans[i].style.opacity=(0.18+0.82*show[i]).toFixed(2);
+  }
+  var centroid=sum>0?wsum/sum/(N-1):0.4;
+  if(peak<GATE){
+    var quiet=now-lastSound;
+    if(quiet>320) pendingSpace=true;
+    if(quiet>1400) pendingBreak=true;
+  }else{
+    lastSound=now;
+    if(now>=nextAt){
+      /* the band that stands out most against its own recent level wins */
+      var best=-1, bs=0, second=-1, ss=0;
+      for(i=0;i<N;i++){
+        if(e[i]<GATE) continue;
+        var sc=e[i]/(avg[i]+0.08);
+        if(sc>bs){ second=best; ss=bs; best=i; bs=sc; } else if(sc>ss){ second=i; ss=sc; }
+      }
+      /* a held note does not stutter: same letter repeats only on a new attack or after a pause */
+      if(best===lastIdx&&now-lastStamp<420&&e[best]<=lastE*1.15){ best=(second>=0&&ss>bs*0.45)?second:-1; }
+      if(best>=0){
+        stamp(best,e[best],centroid,now);
+        lastIdx=best; lastE=e[best]; lastStamp=now;
+        nextAt=now+240-180*Math.min(1,peak);
+      }
+    }
+  }
+  var k=dt/1100; for(i=0;i<N;i++) avg[i]+=(e[i]-avg[i])*k;
+  if(lastIdx>=0) lastE*=0.985;
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- controls show and hide with one button ---------- */
+var uiBtn=$('uiBtn');
+function setUI(on){
+  document.body.classList.toggle('bare',!on);
+  uiBtn.setAttribute('aria-pressed',on); uiBtn.textContent=on?'Hide controls':'Show controls';
+}
+function wake(){ if(statusEl.classList.contains('warn')) setUI(true); }
+uiBtn.addEventListener('click',function(){ setUI(document.body.classList.contains('bare')); });
+document.addEventListener('keydown',function(e){
+  if(e.metaKey||e.ctrlKey||e.altKey||e.target===sens) return;
+  var k=(e.key||'').toLowerCase();
+  if(k==='h') uiBtn.click(); else if(k==='m') micBtn.click(); else if(k==='d') demoBtn.click();
+  else if(k==='c') $('clearBtn').click(); else if(k==='f') fileIn.click();
+});
+
+function start(){ measure(); resize(); requestAnimationFrame(frame); }
+/* installed app: fetches the newest version whenever it is online */
+if('serviceWorker' in navigator&&location.protocol==='https:'){ try{ navigator.serviceWorker.register('sw.js').catch(function(){}); }catch(e){} }
+window.addEventListener('resize',resize);
+var started=false, go=function(){ if(!started){ started=true; start(); } };
+if(document.fonts&&document.fonts.load){
+  document.fonts.load('500 40px "EB Garamond"').then(go,go);
+  setTimeout(go,1500);
+}else go();
+})();
+</script>
+</body>
+</html>
