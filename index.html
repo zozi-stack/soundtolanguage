@@ -313,18 +313,23 @@ function setMode(m,msg,warn){
   statusEl.textContent=msg; statusEl.classList.toggle('warn',!!warn); wake();
   avg.fill(0);
 }
-function useMic(){
+function useMic(auto){
   if(mode==='mic'){ stopInputs(); setMode('demo','Demo signal, no sound.'); return; }
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    setMode('demo','This browser gives the page no microphone. Play an audio file instead.',true); return;
+    setMode('demo','This browser gives the page no microphone. Play an audio file instead.',!auto); return;
   }
   navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}})
   .then(function(stream){
     ensureAudio(); stopInputs(); audio.resume();
+    /* some browsers keep audio asleep until the first tap or key press */
+    if(audio.state!=='running'){
+      var kick=function(){ audio.resume(); document.removeEventListener('pointerdown',kick); document.removeEventListener('keydown',kick); };
+      document.addEventListener('pointerdown',kick); document.addEventListener('keydown',kick);
+    }
     micStream=stream; micNode=audio.createMediaStreamSource(stream); micNode.connect(analyser);
     setMode('mic','Listening. Whistle a scale and the letters walk the alphabet.');
   }).catch(function(){
-    setMode('demo','Microphone is blocked in this view. Open the downloaded file in your browser, or play an audio file here.',true);
+    setMode('demo',auto?'Demo signal, no sound. The microphone is unavailable or was declined.':'Microphone is blocked here. Allow it in the browser\'s site settings, or play an audio file.',!auto);
   });
 }
 function useFile(file){
@@ -337,7 +342,7 @@ function useFile(file){
       .catch(function(){ setMode('demo','That file would not play. Try an MP3, WAV or M4A.',true); });
   }catch(e){ setMode('demo','That file would not play. Try an MP3, WAV or M4A.',true); }
 }
-micBtn.addEventListener('click',useMic);
+micBtn.addEventListener('click',function(){ useMic(false); });
 demoBtn.addEventListener('click',function(){ stopInputs(); setMode('demo','Demo signal, no sound.'); });
 fileIn.addEventListener('change',function(){ useFile(fileIn.files[0]); fileIn.value=''; });
 $('clearBtn').addEventListener('click',function(){ resetSheet(); rebuild(); });
@@ -403,7 +408,7 @@ document.addEventListener('keydown',function(e){
   else if(k==='c') $('clearBtn').click(); else if(k==='f') fileIn.click();
 });
 
-function start(){ measure(); resize(); requestAnimationFrame(frame); }
+function start(){ measure(); resize(); requestAnimationFrame(frame); useMic(true); }   /* microphone is the default input; the demo runs until it is allowed */
 /* installed app: fetches the newest version whenever it is online */
 if('serviceWorker' in navigator&&location.protocol==='https:'){ try{ navigator.serviceWorker.register('sw.js').catch(function(){}); }catch(e){} }
 window.addEventListener('resize',resize);
